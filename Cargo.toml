@@ -1,0 +1,17 @@
+[package]
+name = "libarchive-rs"
+version = "0.1.0"
+edition = "2018"
+
+[workspace]
+members = ["libarchive-sys"]
+
+[dependencies]
+
+[dependencies.libarchive-sys]
+path = "libarchive-sys"
+features = ["vendored"]
+
+[[example]]
+name = "list_contents"
+path = "examples/list_contents.rs"

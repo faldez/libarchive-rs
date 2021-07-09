@@ -1,0 +1,23 @@
+[package]
+name = "libarchive-sys"
+version = "0.1.0"
+authors = ["Muhammad Fadhlika <fadhlika@gmail.com>"]
+edition = "2018"
+build = "build.rs"
+
+
+[dependencies]
+
+[build-dependencies]
+cmake = "0.1.45"
+bindgen = "0.58.1"
+
+[target.'cfg(target_env = "msvc")'.build-dependencies]
+vcpkg = "0.2"
+
+[target.'cfg(not(target_env = "msvc"))'.build-dependencies]
+pkg-config = "0.3"
+
+[features]
+static = []
+vendored = ["static"]
