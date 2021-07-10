@@ -6,11 +6,12 @@ edition = "2018"
 [workspace]
 members = ["libarchive-sys"]
 
-[dependencies]
+[features]
+static = ["libarchive-sys/static"]
+vendored = ["libarchive-sys/vendored"]
 
 [dependencies.libarchive-sys]
 path = "libarchive-sys"
-# features = ["vendored"]
 
 [[example]]
 name = "list_contents"
