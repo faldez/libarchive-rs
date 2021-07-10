@@ -133,6 +133,7 @@ fn link_deps(mode: &str) {
     link_icuuc(mode);
 }
 
+#[cfg(not(target_env = "msvc"))]
 fn find_link_paths() {
     let pc_path = pkg_config::get_variable("pkg-config", "pc_path").expect("failed to get pc_path");
 
@@ -153,6 +154,7 @@ fn find_link_paths() {
     }
 }
 
+#[cfg(not(target_env = "msvc"))]
 fn link_expat(mode: &str) {
     let expat = pkg_config::Config::new()
         .statik(mode == "static")
@@ -168,6 +170,7 @@ fn link_expat(mode: &str) {
     }
 }
 
+#[cfg(not(target_env = "msvc"))]
 fn link_icuuc(mode: &str) {
     let icu_uc = pkg_config::Config::new()
         .statik(mode == "static")
