@@ -10,7 +10,7 @@ members = ["libarchive-sys"]
 
 [dependencies.libarchive-sys]
 path = "libarchive-sys"
-features = ["vendored"]
+# features = ["vendored"]
 
 [[example]]
 name = "list_contents"
