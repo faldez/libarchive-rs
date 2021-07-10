@@ -15,7 +15,7 @@ fn main() {
         link_deps(mode);
     }
 
-    link_libarchive();
+    link_libarchive(mode);
 
     generate_binding();
 }
@@ -65,7 +65,7 @@ fn build_libarchive() {
 }
 
 #[cfg(target_env = "msvc")]
-fn link_libarchive() {
+fn link_libarchive(_mode: &str) {
     if cfg!(feature = "vendored") {
         println!("cargo:rustc-link-lib=static=archive_static");
     } else {
@@ -103,7 +103,7 @@ fn link_deps(_mode: &str) {
 }
 
 #[cfg(not(target_env = "msvc"))]
-fn link_deps() {
+fn link_deps(mode: &str) {
     let pc_path = pkg_config::get_variable("pkg-config", "pc_path").expect("failed to get pc_path");
 
     for path in pc_path.split(":") {
@@ -115,15 +115,15 @@ fn link_deps() {
 
     println!("cargo:rustc-link-lib=dylib=stdc++");
 
-    println!("cargo:rustc-link-lib=static=icuuc");
-    println!("cargo:rustc-link-lib=static=icudata");
+    println!("cargo:rustc-link-lib={}=icuuc", mode);
+    println!("cargo:rustc-link-lib={}=icudata", mode);
 
-    println!("cargo:rustc-link-lib=static=nettle");
-    println!("cargo:rustc-link-lib=static=acl");
-    println!("cargo:rustc-link-lib=static=lzma");
-    println!("cargo:rustc-link-lib=static=zstd");
-    println!("cargo:rustc-link-lib=static=lz4");
-    println!("cargo:rustc-link-lib=static=bz2");
-    println!("cargo:rustc-link-lib=static=z");
-    println!("cargo:rustc-link-lib=static=xml2");
+    println!("cargo:rustc-link-lib={}=nettle", mode);
+    println!("cargo:rustc-link-lib={}=acl", mode);
+    println!("cargo:rustc-link-lib={}=lzma", mode);
+    println!("cargo:rustc-link-lib={}=zstd", mode);
+    println!("cargo:rustc-link-lib={}=lz4", mode);
+    println!("cargo:rustc-link-lib={}=bz2", mode);
+    println!("cargo:rustc-link-lib={}=z", mode);
+    println!("cargo:rustc-link-lib={}=xml2", mode);
 }
