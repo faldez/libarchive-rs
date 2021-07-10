@@ -113,13 +113,13 @@ fn link_deps(mode: &str) {
         );
     }
 
-    let pkg_config_path = std::env!("PKG_CONFIG_PATH");
-
-    for path in pkg_config_path.split(":") {
-        println!(
-            "cargo:rustc-link-search=native={}",
-            path.replace("/pkgconfig", "")
-        );
+    if let Ok(pkg_config_path) = std::env::var("PKG_CONFIG_PATH") {
+        for path in pkg_config_path.split(":") {
+            println!(
+                "cargo:rustc-link-search=native={}",
+                path.replace("/pkgconfig", "")
+            );
+        }
     }
 
     #[cfg(target_os = "linux")]
@@ -133,7 +133,7 @@ fn link_deps(mode: &str) {
     for link_path in icu_uc.link_paths {
         println!("cargo:rustc-link-search=native={}", link_path.display());
     }
-    
+
     for lib in icu_uc.libs {
         if lib == "pthread" || lib == "m" {
             continue;
@@ -162,7 +162,7 @@ fn link_deps(mode: &str) {
     for link_path in libarchive.link_paths {
         println!("cargo:rustc-link-search=native={}", link_path.display());
     }
-    
+
     #[cfg(target_os = "macos")]
     println!("cargo:rustc-link-search=native=/usr/local/opt/bzip2/lib");
 
