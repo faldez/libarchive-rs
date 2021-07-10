@@ -113,17 +113,60 @@ fn link_deps(mode: &str) {
         );
     }
 
+    let pkg_config_path = std::env!("PKG_CONFIG_PATH");
+
+    for path in pkg_config_path.split(":") {
+        println!(
+            "cargo:rustc-link-search=native={}",
+            path.replace("/pkgconfig", "")
+        );
+    }
+
+    #[cfg(target_os = "linux")]
     println!("cargo:rustc-link-lib=dylib=stdc++");
 
-    println!("cargo:rustc-link-lib={}=icuuc", mode);
-    println!("cargo:rustc-link-lib={}=icudata", mode);
+    let icu_uc = pkg_config::Config::new()
+        .statik(mode == "static")
+        .probe("icu-uc")
+        .expect("Unable to find icu-uc");
 
-    println!("cargo:rustc-link-lib={}=nettle", mode);
-    println!("cargo:rustc-link-lib={}=acl", mode);
-    println!("cargo:rustc-link-lib={}=lzma", mode);
-    println!("cargo:rustc-link-lib={}=zstd", mode);
-    println!("cargo:rustc-link-lib={}=lz4", mode);
-    println!("cargo:rustc-link-lib={}=bz2", mode);
-    println!("cargo:rustc-link-lib={}=z", mode);
-    println!("cargo:rustc-link-lib={}=xml2", mode);
+    for link_path in icu_uc.link_paths {
+        println!("cargo:rustc-link-search=native={}", link_path.display());
+    }
+    
+    for lib in icu_uc.libs {
+        if lib == "pthread" || lib == "m" {
+            continue;
+        }
+        println!("cargo:rustc-link-lib={}={}", mode, lib);
+    }
+
+    let expat = pkg_config::Config::new()
+        .statik(mode == "static")
+        .probe("expat")
+        .expect("Unable to find expat");
+
+    for link_path in expat.link_paths {
+        println!("cargo:rustc-link-search=native={}", link_path.display());
+    }
+
+    for lib in expat.libs {
+        println!("cargo:rustc-link-lib={}={}", mode, lib);
+    }
+
+    let libarchive = pkg_config::Config::new()
+        .statik(mode == "static")
+        .probe("libarchive")
+        .expect("Unable to find libarchive");
+
+    for link_path in libarchive.link_paths {
+        println!("cargo:rustc-link-search=native={}", link_path.display());
+    }
+    
+    #[cfg(target_os = "macos")]
+    println!("cargo:rustc-link-search=native=/usr/local/opt/bzip2/lib");
+
+    for lib in libarchive.libs {
+        println!("cargo:rustc-link-lib={}={}", mode, lib);
+    }
 }
