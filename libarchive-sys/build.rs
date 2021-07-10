@@ -178,10 +178,6 @@ fn link_icuuc(mode: &str) {
         println!("cargo:rustc-link-search=native={}", link_path.display());
     }
 
-    for lib in icu_uc.libs {
-        if lib == "pthread" || lib == "m" {
-            continue;
-        }
-        println!("cargo:rustc-link-lib={}={}", mode, lib);
-    }
+    println!("cargo:rustc-link-lib={}=icuuc", mode);
+    println!("cargo:rustc-link-lib={}=icudata", mode);
 }
