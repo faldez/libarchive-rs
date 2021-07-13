@@ -7,9 +7,8 @@ fn main() {
         "dylib"
     };
 
-    if cfg!(feature = "vendored") {
-        build_libarchive();
-    }
+    #[cfg(feature = "vendored")]
+    build_libarchive();
 
     if mode == "static" || cfg!(all(target_env = "msvc", feature = "vendored")) {
         link_deps(mode);
@@ -47,6 +46,7 @@ fn generate_binding() {
         .expect("Couldn't write bindings!");
 }
 
+#[cfg(feature = "vendored")]
 fn build_libarchive() {
     let dst = cmake::Config::new("libarchive")
         .define("ENABLE_TEST", "OFF")
