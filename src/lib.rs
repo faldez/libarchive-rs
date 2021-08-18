@@ -5,8 +5,7 @@ use std::ptr;
 use libarchive_sys::{
     archive, archive_entry_pathname_utf8, archive_error_string, archive_read_data,
     archive_read_free, archive_read_new, archive_read_next_header, archive_read_open_filename,
-    archive_read_support_compression_all, archive_read_support_filter_all,
-    archive_read_support_format_all, ARCHIVE_EOF, ARCHIVE_OK,
+    archive_read_support_filter_all, archive_read_support_format_all, ARCHIVE_EOF, ARCHIVE_OK,
 };
 
 pub struct ArchiveReader {
@@ -59,7 +58,6 @@ impl ArchiveReader {
             archive_read_support_filter_all(archive);
             // enable all possible file formats
             archive_read_support_format_all(archive);
-            archive_read_support_compression_all(archive);
         }
 
         let res =
