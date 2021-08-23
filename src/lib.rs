@@ -1,3 +1,4 @@
+use std::convert::TryInto;
 use std::ffi::{CStr, CString};
 use std::fmt;
 use std::ptr;
@@ -60,8 +61,9 @@ impl ArchiveReader {
             archive_read_support_format_all(archive);
         }
 
-        let res =
-            unsafe { archive_read_open_filename(archive, filename.as_ptr(), block_size as u64) };
+        let res = unsafe {
+            archive_read_open_filename(archive, filename.as_ptr(), block_size.try_into().unwrap())
+        };
         if res != ARCHIVE_OK as i32 {
             let message = unsafe { CStr::from_ptr(archive_error_string(archive)) };
             let message = message.to_string_lossy().to_string();
