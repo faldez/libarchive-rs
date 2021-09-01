@@ -1,17 +1,24 @@
-use std::convert::TryInto;
-use std::ffi::{CStr, CString};
+use std::ffi::{c_void, CStr, CString};
 use std::fmt;
+use std::io::Read;
 use std::ptr;
 
 use libarchive_sys::{
-    archive, archive_entry_pathname_utf8, archive_error_string, archive_read_data,
-    archive_read_free, archive_read_new, archive_read_next_header, archive_read_open_filename,
-    archive_read_support_filter_all, archive_read_support_format_all, ARCHIVE_EOF, ARCHIVE_OK,
+    archive, archive_entry, archive_entry_pathname, archive_entry_pathname_utf8,
+    archive_error_string, archive_read_close, archive_read_data, archive_read_data_skip,
+    archive_read_finish, archive_read_free, archive_read_new, archive_read_next_header,
+    archive_read_open, archive_read_open_filename, archive_read_set_seek_callback,
+    archive_read_support_compression_all, archive_read_support_filter_all,
+    archive_read_support_format_all, archive_set_error, la_ssize_t, ARCHIVE_EOF, ARCHIVE_OK,
 };
+
+const BLOCK_SIZE: usize = 10_240;
 
 pub struct ArchiveReader {
     archive: *mut archive,
+    entry: *mut archive_entry,
     state: ArchiveState,
+    _reader: Reader,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -44,8 +51,42 @@ enum ArchiveState {
     Eof,
 }
 
+pub struct Reader {
+    reader: Box<dyn Read>,
+    buffer: [u8; BLOCK_SIZE],
+}
+
+unsafe extern "C" fn libarchive_read_callback(
+    archive: *mut archive,
+    client_data: *mut c_void,
+    buff: *mut *const c_void,
+) -> la_ssize_t {
+    let reader = (client_data as *mut Reader).as_mut().unwrap();
+
+    *buff = reader.buffer.as_ptr() as *const c_void;
+
+    match reader.reader.read(&mut reader.buffer) {
+        Ok(size) => size as la_ssize_t,
+        Err(e) => {
+            let str = CString::new(e.to_string()).unwrap();
+            archive_set_error(archive, e.raw_os_error().unwrap_or(0), str.as_ptr());
+            -1
+        }
+    }
+}
+
 impl ArchiveReader {
-    pub fn new(filename: &CStr, block_size: usize) -> Result<Self, ArchiveReaderError> {
+    pub fn new(filename: &str) -> Result<Self, ArchiveReaderError> {
+        let file = std::fs::File::open(filename)
+            .map_err(|e| ArchiveReaderError::Message(e.to_string()))?;
+
+        let mut reader = Reader {
+            reader: Box::new(file),
+            buffer: [0; BLOCK_SIZE],
+        };
+
+        let entry: *mut archive_entry = ptr::null_mut();
+
         let archive = unsafe { archive_read_new() };
 
         // a null pointer is returned if it failed to allocate
@@ -56,14 +97,21 @@ impl ArchiveReader {
         // see: https://stackoverflow.com/a/62800478
         unsafe {
             // enable all available compression "filters" for the archive
-            archive_read_support_filter_all(archive);
+            archive_read_support_compression_all(archive);
             // enable all possible file formats
             archive_read_support_format_all(archive);
         }
 
         let res = unsafe {
-            archive_read_open_filename(archive, filename.as_ptr(), block_size.try_into().unwrap())
+            archive_read_open(
+                archive,
+                (&mut reader as *mut Reader) as *mut c_void,
+                None,
+                Some(libarchive_read_callback),
+                None,
+            )
         };
+
         if res != ARCHIVE_OK as i32 {
             let message = unsafe { CStr::from_ptr(archive_error_string(archive)) };
             let message = message.to_string_lossy().to_string();
@@ -73,12 +121,14 @@ impl ArchiveReader {
 
         Ok(Self {
             archive,
+            entry,
+            _reader: reader,
             state: ArchiveState::Initialized,
         })
     }
 
     pub fn read(&mut self) -> Result<Vec<u8>, ArchiveReaderError> {
-        let mut buf = [0_u8; 10_240];
+        let mut buf = [0_u8; BLOCK_SIZE];
         let mut data = vec![];
 
         // this prevents reading the same file more than once
@@ -91,22 +141,22 @@ impl ArchiveReader {
                 archive_read_data(
                     self.archive,
                     buf.as_mut_ptr() as *mut std::ffi::c_void,
-                    10_240,
+                    BLOCK_SIZE as _,
                 )
             };
 
             // check if the end has been reached:
-            if res == 0 {
-                break;
-            // an error occured
-            } else if res < 0 {
-                let message = unsafe { CStr::from_ptr(archive_error_string(self.archive)) };
-                let message = message.to_string_lossy().to_string();
-                return Err(ArchiveReaderError::Message(message));
+            match res {
+                0 => break,
+                // an error occured
+                res if res < 0 => {
+                    let message = unsafe { CStr::from_ptr(archive_error_string(self.archive)) };
+                    let message = message.to_string_lossy().to_string();
+                    return Err(ArchiveReaderError::Message(message));
+                }
+                // res = number of bytes read
+                _ => data.extend_from_slice(&buf[0..res as usize]),
             }
-
-            // res = number of bytes read
-            data.extend_from_slice(&buf[0..res as usize]);
         }
 
         Ok(data)
@@ -121,21 +171,28 @@ impl<'a> Iterator for ArchiveReader {
             return None;
         }
 
-        let mut entry = ptr::null_mut();
+        unsafe {
+            match archive_read_next_header(self.archive, &mut self.entry as *mut _) as _ {
+                ARCHIVE_OK => {
+                    self.state = ArchiveState::ReadyForRead;
+                    let c_str = CStr::from_ptr(archive_entry_pathname(self.entry));
+                    let name = c_str.to_string_lossy().to_string();
 
-        let res = unsafe { archive_read_next_header(self.archive, &mut entry as *mut _) };
-
-        if res == ARCHIVE_OK as i32 {
-            self.state = ArchiveState::ReadyForRead;
-            let c_str = unsafe { CStr::from_ptr(archive_entry_pathname_utf8(entry)) };
-            let name = c_str.to_str().unwrap().to_string();
-
-            Some(name)
-        } else if res == ARCHIVE_EOF as i32 {
-            self.state = ArchiveState::Eof;
-            None
-        } else {
-            panic!("a fatal error occured while reading the archive")
+                    Some(name)
+                }
+                ARCHIVE_EOF => {
+                    self.state = ArchiveState::Eof;
+                    None
+                }
+                _ => {
+                    let message = CStr::from_ptr(archive_error_string(self.archive));
+                    let message = message.to_string_lossy().to_string();
+                    panic!(
+                        "a fatal error occured while reading the archive: {}",
+                        message
+                    )
+                }
+            }
         }
     }
 }
@@ -143,23 +200,29 @@ impl<'a> Iterator for ArchiveReader {
 impl Drop for ArchiveReader {
     fn drop(&mut self) {
         // SAFETY: free might fail, but drops should always succeed
-        unsafe { archive_read_free(self.archive) };
+        unsafe {
+            archive_read_close(self.archive);
+            archive_read_free(self.archive);
+        }
     }
 }
 
 pub fn list_archive_files(filename: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-    let filename = CString::new(filename).expect("CString::new failed");
-    let reader = ArchiveReader::new(&filename, 10_240)?;
-
-    Ok(reader.collect::<Vec<_>>())
+    // let filename = CString::new(filename).expect("CString::new failed");
+    let reader = ArchiveReader::new(filename)?;
+    let mut files = vec![];
+    for file in reader {
+        files.push(file);
+    }
+    Ok(files)
 }
 
 pub fn extract_archive_file(
     filename: &str,
     path: &str,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let filename = CString::new(filename).expect("CString::new failed");
-    let mut reader = ArchiveReader::new(&filename, 16_384)?;
+    // let filename = CString::new(filename).expect("CString::new failed");
+    let mut reader = ArchiveReader::new(filename)?;
 
     if reader.any(|file| file == path) {
         Ok(reader.read()?)
@@ -172,33 +235,59 @@ pub fn extract_archive_file(
 mod tests {
     use super::*;
 
-    const EXAMPLE_ZIP_PATH: &str = "resources/example.zip";
+    const EXAMPLE_ZIP_PATH: &str = "resources/Space_Adventures_004__c2c__diff_ver.cbz";
 
     #[test]
     fn test_list_archive_files() {
         assert_eq!(
             list_archive_files(EXAMPLE_ZIP_PATH).unwrap(),
             vec![
-                "a.txt".to_string(),
-                "b.txt".to_string(),
-                "c.txt".to_string(),
+                "SPA00401.JPG".to_string(),
+                "SPA00402.JPG".to_string(),
+                "SPA00403.JPG".to_string(),
+                "SPA00404.JPG".to_string(),
+                "SPA00405.JPG".to_string(),
+                "SPA00406.JPG".to_string(),
+                "SPA00407.JPG".to_string(),
+                "SPA00408.JPG".to_string(),
+                "SPA00409.JPG".to_string(),
+                "SPA00410.JPG".to_string(),
+                "SPA00411.JPG".to_string(),
+                "SPA00412.JPG".to_string(),
+                "SPA00413.JPG".to_string(),
+                "SPA00414.JPG".to_string(),
+                "SPA00415.JPG".to_string(),
+                "SPA00416.JPG".to_string(),
+                "SPA00417.JPG".to_string(),
+                "SPA00418.JPG".to_string(),
+                "SPA00419.JPG".to_string(),
+                "SPA00420.JPG".to_string(),
+                "SPA00421.JPG".to_string(),
+                "SPA00422.JPG".to_string(),
+                "SPA00423.JPG".to_string(),
+                "SPA00424.JPG".to_string(),
+                "SPA00425.JPG".to_string(),
+                "SPA00426.JPG".to_string(),
+                "SPA00427.JPG".to_string(),
+                "SPA00428.JPG".to_string(),
+                "SPA00429.JPG".to_string(),
+                "SPA00430.JPG".to_string(),
+                "SPA00431.JPG".to_string(),
+                "SPA00432.JPG".to_string(),
+                "SPA00433.JPG".to_string(),
+                "SPA00434.JPG".to_string(),
+                "SPA00435.JPG".to_string(),
+                "SPA00436.JPG".to_string(),
             ]
         );
     }
 
     #[test]
     fn test_extract_archive_file() {
+        let image = std::include_bytes!("../resources/SPA00401.JPG");
         assert_eq!(
-            extract_archive_file(EXAMPLE_ZIP_PATH, "a.txt").unwrap(),
-            b"a".to_vec()
-        );
-        assert_eq!(
-            extract_archive_file(EXAMPLE_ZIP_PATH, "b.txt").unwrap(),
-            b"b".to_vec()
-        );
-        assert_eq!(
-            extract_archive_file(EXAMPLE_ZIP_PATH, "c.txt").unwrap(),
-            b"c".to_vec()
+            extract_archive_file(EXAMPLE_ZIP_PATH, "SPA00401.JPG").unwrap(),
+            image
         );
     }
 }
