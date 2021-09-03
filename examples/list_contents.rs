@@ -1,7 +1,8 @@
 use libarchive_rs::*;
 
 fn main() {
-    let reader = ArchiveReader::new("resources/Space_Adventures_004__c2c__diff_ver.cbz").unwrap();
+    let file = std::fs::File::open("resources/Space_Adventures_004__c2c__diff_ver.cbz").unwrap();
+    let reader = ArchiveReader::from_read(&file).unwrap();
     for file in reader {
         println!("{}", file);
     }

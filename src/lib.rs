@@ -14,11 +14,14 @@ use libarchive_sys::{
 
 const BLOCK_SIZE: usize = 10_240;
 
-pub struct ArchiveReader {
+pub struct ArchiveReader<R>
+where
+    R: Read,
+{
     archive: *mut archive,
     entry: *mut archive_entry,
     state: ArchiveState,
-    _reader: Reader,
+    _reader: Reader<R>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -51,17 +54,23 @@ enum ArchiveState {
     Eof,
 }
 
-pub struct Reader {
-    reader: Box<dyn Read>,
+pub struct Reader<R>
+where
+    R: Read,
+{
+    reader: R,
     buffer: [u8; BLOCK_SIZE],
 }
 
-unsafe extern "C" fn libarchive_read_callback(
+unsafe extern "C" fn libarchive_read_callback<R>(
     archive: *mut archive,
     client_data: *mut c_void,
     buff: *mut *const c_void,
-) -> la_ssize_t {
-    let reader = (client_data as *mut Reader).as_mut().unwrap();
+) -> la_ssize_t
+where
+    R: Read,
+{
+    let reader = (client_data as *mut Reader<R>).as_mut().unwrap();
 
     *buff = reader.buffer.as_ptr() as *const c_void;
 
@@ -75,13 +84,13 @@ unsafe extern "C" fn libarchive_read_callback(
     }
 }
 
-impl ArchiveReader {
-    pub fn new(filename: &str) -> Result<Self, ArchiveReaderError> {
-        let file = std::fs::File::open(filename)
-            .map_err(|e| ArchiveReaderError::Message(e.to_string()))?;
-
+impl<R> ArchiveReader<R>
+where
+    R: Read,
+{
+    pub fn from_read(read: R) -> Result<Self, ArchiveReaderError> {
         let mut reader = Reader {
-            reader: Box::new(file),
+            reader: read,
             buffer: [0; BLOCK_SIZE],
         };
 
@@ -105,9 +114,9 @@ impl ArchiveReader {
         let res = unsafe {
             archive_read_open(
                 archive,
-                (&mut reader as *mut Reader) as *mut c_void,
+                (&mut reader as *mut Reader<R>) as *mut c_void,
                 None,
-                Some(libarchive_read_callback),
+                Some(libarchive_read_callback::<R>),
                 None,
             )
         };
@@ -163,7 +172,10 @@ impl ArchiveReader {
     }
 }
 
-impl<'a> Iterator for ArchiveReader {
+impl<'a, R> Iterator for ArchiveReader<R>
+where
+    R: Read,
+{
     type Item = String;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -197,7 +209,10 @@ impl<'a> Iterator for ArchiveReader {
     }
 }
 
-impl Drop for ArchiveReader {
+impl<R> Drop for ArchiveReader<R>
+where
+    R: Read,
+{
     fn drop(&mut self) {
         // SAFETY: free might fail, but drops should always succeed
         unsafe {
@@ -208,22 +223,20 @@ impl Drop for ArchiveReader {
 }
 
 pub fn list_archive_files(filename: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-    // let filename = CString::new(filename).expect("CString::new failed");
-    let reader = ArchiveReader::new(filename)?;
-    let mut files = vec![];
-    for file in reader {
-        files.push(file);
-    }
-    Ok(files)
+    let file =
+        std::fs::File::open(filename).map_err(|e| ArchiveReaderError::Message(e.to_string()))?;
+    let reader = ArchiveReader::from_read(&file)?;
+
+    Ok(reader.collect())
 }
 
 pub fn extract_archive_file(
     filename: &str,
     path: &str,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    // let filename = CString::new(filename).expect("CString::new failed");
-    let mut reader = ArchiveReader::new(filename)?;
-
+    let file =
+        std::fs::File::open(filename).map_err(|e| ArchiveReaderError::Message(e.to_string()))?;
+    let mut reader = ArchiveReader::from_read(&file)?;
     if reader.any(|file| file == path) {
         Ok(reader.read()?)
     } else {
