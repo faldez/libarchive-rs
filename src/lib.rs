@@ -4,12 +4,10 @@ use std::io::Read;
 use std::ptr;
 
 use libarchive_sys::{
-    archive, archive_entry, archive_entry_pathname, archive_entry_pathname_utf8,
-    archive_error_string, archive_read_close, archive_read_data, archive_read_data_skip,
-    archive_read_finish, archive_read_free, archive_read_new, archive_read_next_header,
-    archive_read_open, archive_read_open_filename, archive_read_set_seek_callback,
-    archive_read_support_compression_all, archive_read_support_filter_all,
-    archive_read_support_format_all, archive_set_error, la_ssize_t, ARCHIVE_EOF, ARCHIVE_OK,
+    archive, archive_entry, archive_entry_pathname, archive_error_string, archive_read_close,
+    archive_read_data, archive_read_free, archive_read_new, archive_read_next_header,
+    archive_read_open, archive_read_support_compression_all, archive_read_support_format_all,
+    archive_set_error, la_ssize_t, ARCHIVE_EOF, ARCHIVE_OK,
 };
 
 const BLOCK_SIZE: usize = 10_240;
@@ -227,7 +225,12 @@ pub fn list_archive_files(filename: &str) -> Result<Vec<String>, Box<dyn std::er
         std::fs::File::open(filename).map_err(|e| ArchiveReaderError::Message(e.to_string()))?;
     let reader = ArchiveReader::from_read(&file)?;
 
-    Ok(reader.collect())
+    let mut files = vec![];
+    for f in reader {
+        files.push(f);
+    }
+
+    Ok(files)
 }
 
 pub fn extract_archive_file(
